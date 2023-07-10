@@ -1,5 +1,10 @@
 package main
 
+import (
+	"log"
+	"time"
+)
+
 type User struct {
 	Email string
 }
@@ -35,17 +40,43 @@ func NewHandler(
 }
 
 func (h Handler) SignUp(u User) error {
-	if err := h.repository.CreateUserAccount(u); err != nil {
-		return err
+	timesToRepeat := 5
+	createUserFunc := func() error {
+		return h.repository.CreateUserAccount(u)
 	}
 
-	if err := h.newsletterClient.AddToNewsletter(u); err != nil {
-		return err
-	}
+	userCreatedCh := make(chan struct{})
+	go func() {
+		runRepeatedly(createUserFunc, timesToRepeat)
+		close(userCreatedCh)
+	}()
+	<-userCreatedCh
 
-	if err := h.notificationsClient.SendNotification(u); err != nil {
-		return err
+	addToNewsletterFunc := func() error {
+		return h.newsletterClient.AddToNewsletter(u)
 	}
+	go func() {
+		runRepeatedly(addToNewsletterFunc, timesToRepeat)
+	}()
+
+	sendNotificationFunc := func() error {
+		return h.notificationsClient.SendNotification(u)
+	}
+	go func() {
+		runRepeatedly(sendNotificationFunc, timesToRepeat)
+	}()
 
 	return nil
+}
+
+func runRepeatedly(runFunc func() error, timesToRepeat int) {
+	for i := 0; i < timesToRepeat; i++ {
+		if err := runFunc(); err != nil {
+			log.Printf("\nrunning func: %v\n", err)
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
+		break
+	}
 }
